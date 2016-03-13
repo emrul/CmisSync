@@ -1,9 +1,9 @@
-<?xml version="1.0" encoding="utf-8"?>
+﻿<?xml version="1.0" encoding="utf-8"?>
 <Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup>
     <Configuration Condition=" '$(Configuration)' == '' ">Debug</Configuration>
     <Platform Condition=" '$(Platform)' == '' ">AnyCPU</Platform>
-    <ProductVersion>10.0.0</ProductVersion>
+    <ProductVersion>8.0.30703</ProductVersion>
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>{CF5BC8DB-A633-4FCC-8A3E-E3AC9B59FABC}</ProjectGuid>
     <!--
@@ -17,6 +17,8 @@
     <ReleaseVersion>
     </ReleaseVersion>
     <UseMSBuildEngine>False</UseMSBuildEngine>
+    <SuppressXamMacUpsell>True</SuppressXamMacUpsell>
+    <SuppressXamMacMigration>True</SuppressXamMacMigration>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Release|AnyCPU' ">
     <DebugType>none</DebugType>
@@ -34,6 +36,7 @@
     <I18n>cjk,mideast,other,rare,west</I18n>
     <UseSGen>true</UseSGen>
     <DefineConstants>__COCOA__</DefineConstants>
+    <UseRefCounting>false</UseRefCounting>
   </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <Optimize>False</Optimize>
@@ -47,10 +50,7 @@
     <DefineConstants>DEBUG,__COCOA__</DefineConstants>
     <DebugSymbols>True</DebugSymbols>
     <CheckForOverflowUnderflow>true</CheckForOverflowUnderflow>
-    <CodeSigningKey>Mac Developer</CodeSigningKey>
-    <PackageSigningKey>Developer ID Installer</PackageSigningKey>
-    <I18n>
-    </I18n>
+    <UseRefCounting>false</UseRefCounting>
   </PropertyGroup>
   <ItemGroup>
     <Reference Include="System" />
@@ -143,13 +143,13 @@
     <Compile Include="SetupSubTutorialEnd.designer.cs">
       <DependentUpon>SetupSubTutorialEnd.cs</DependentUpon>
     </Compile>
-    <Compile Include="SetupSubRepoSelectController.cs" />
     <Compile Include="FolderTreeMVC\NodeModel.cs">
       <Link>NodeModel.cs</Link>
     </Compile>
     <Compile Include="FolderTreeMVC\NodeLoader.cs">
       <Link>NodeLoader.cs</Link>
     </Compile>
+    <Compile Include="SetupSubRepoSelectController.cs" />
     <Compile Include="FolderTreeMVC\LoadingStatusModel.cs">
       <Link>CmisTree\LoadingStatusModel.cs</Link>
     </Compile>
@@ -179,15 +179,6 @@
           <TextStylePolicy inheritsSet="VisualStudio" inheritsScope="text/plain" scope="text/x-csharp" />
           <CSharpFormattingPolicy IndentSwitchBody="True" AnonymousMethodBraceStyle="NextLine" PropertyBraceStyle="NextLine" PropertyGetBraceStyle="NextLine" PropertySetBraceStyle="NextLine" EventBraceStyle="NextLine" EventAddBraceStyle="NextLine" EventRemoveBraceStyle="NextLine" StatementBraceStyle="NextLine" ElseNewLinePlacement="NewLine" CatchNewLinePlacement="NewLine" FinallyNewLinePlacement="NewLine" WhileNewLinePlacement="DoNotCare" ArrayInitializerWrapping="DoNotChange" ArrayInitializerBraceStyle="NextLine" BeforeMethodDeclarationParentheses="False" BeforeMethodCallParentheses="False" BeforeConstructorDeclarationParentheses="False" BeforeDelegateDeclarationParentheses="False" NewParentheses="False" SpacesBeforeBrackets="False" inheritsSet="Mono" inheritsScope="text/x-csharp" scope="text/x-csharp" />
         </Policies>
-        <MonoDevelop.Autotools.MakefileInfo IntegrationEnabled="True" RelativeMakefileName="Makefile.am" BuildTargetName="" CleanTargetName="" IsAutotoolsProject="True" RelativeConfigureInPath="../..">
-          <BuildFilesVar Sync="True" Name="SOURCES" />
-          <DeployFilesVar />
-          <ResourcesVar Sync="True" Name="RESOURCES_RESX_XAMARIN" Prefix="CmisSync" />
-          <OthersVar />
-          <GacRefVar />
-          <AsmRefVar />
-          <ProjectRefVar />
-        </MonoDevelop.Autotools.MakefileInfo>
       </Properties>
     </MonoDevelop>
   </ProjectExtensions>

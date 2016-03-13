@@ -9,6 +9,7 @@ using System.Data.Common;
 using DotCMIS;
 using DotCMIS.Client;
 using CmisSync.Lib.Cmis;
+using System.Threading;
 
 
 namespace CmisSync.Lib.Sync
@@ -21,182 +22,284 @@ namespace CmisSync.Lib.Sync
         public partial class SynchronizedFolder
         {
             /// <summary>
-            /// Watchers the sync.
+            /// Synchronization based on local filesystem monitoring ("watcher").
             /// </summary>
             /// <param name="remoteFolder">Remote folder.</param>
             /// <param name="localFolder">Local folder.</param>
-            private void WatcherSync(string remoteFolder, string localFolder)
+            /// <returns>Whether something has changed in the local folder</returns>
+            private bool WatcherSync(string remoteFolder, string localFolder)
             {
                 Logger.Debug(remoteFolder + " : " + localFolder);
-                foreach (string pathname in repo.Watcher.GetChangeList())
+                bool locallyModified = false;
+                SleepWhileSuspended();
+                Queue<FileSystemEventArgs> changeQueue = repo.Watcher.GetChangeQueue();
+                repo.Watcher.Clear();
+                if (Logger.IsDebugEnabled)
                 {
-                    if (repoinfo.isPathIgnored(pathname))
+                    foreach (FileSystemEventArgs change in changeQueue)
                     {
-                        repo.Watcher.RemoveChange(pathname);
-                        continue;
-                    }
-
-                    if (!pathname.StartsWith(localFolder))
-                    {
-                        Debug.Assert(false, String.Format("Invalid pathname {0} for target {1}.", pathname, localFolder));
-                    }
-
-                    if (pathname == localFolder)
-                    {
-                        repo.Watcher.RemoveChange(pathname);
-                        continue;
-                    }
-
-                    Watcher.ChangeTypes change = repo.Watcher.GetChangeType(pathname);
-                    bool worthSync = true;
-                    string name = pathname.Substring(localFolder.Length + 1);
-                    string[] folderNames = name.Split(Path.DirectorySeparatorChar);
-                    for (int i = 0; i < folderNames.Length - 1; i++)
-                    {
-                        if (Utils.IsInvalidFolderName(folderNames[i]))
-                        {
-                            repo.Watcher.RemoveChange(pathname);
-                            worthSync = false;
-                            break;
-                        }
-                    }
-                    if (change == Watcher.ChangeTypes.Changed || change == Watcher.ChangeTypes.Created)
-                    {
-                        if ((File.Exists(pathname) && !Utils.IsDirectoryWorthSyncing(folderNames[folderNames.Length - 1], repoinfo)) ||
-                           (Directory.Exists(pathname) && Utils.IsInvalidFolderName(folderNames[folderNames.Length - 1])))
-                        {
-                            repo.Watcher.RemoveChange(pathname);
-                            worthSync = false;
-                        }
-                    }
-                    if (!worthSync)
-                    {
-                        continue;
-                    }
-
-                    Logger.Debug(String.Format("Detect change {0} for {1}.", change, pathname));
-                    switch (change)
-                    {
-                        case Watcher.ChangeTypes.Created:
-                        case Watcher.ChangeTypes.Changed:
-                            WatcherSyncUpdate(remoteFolder, localFolder, pathname);
-                            break;
-                        case Watcher.ChangeTypes.Deleted:
-                            WatcherSyncDelete(remoteFolder, localFolder, pathname);
-                            break;
-                        default:
-                            Debug.Assert(false, String.Format("Invalid change {0} for pathname {1}.", change, pathname));
-                            break;
+                        if (change is CmisSync.Lib.Watcher.MovedEventArgs) Logger.DebugFormat("Moved: {0} -> {1}", ((CmisSync.Lib.Watcher.MovedEventArgs)change).OldFullPath, change.FullPath);
+                        else if (change is RenamedEventArgs) Logger.DebugFormat("Renamed: {0} -> {1}", ((RenamedEventArgs)change).OldFullPath, change.FullPath);
+                        else Logger.DebugFormat("{0}: {1}", change.ChangeType, change.FullPath);
                     }
                 }
+                while (changeQueue.Count > 0)
+                {
+                    activityListener.ActivityStarted();
+                    FileSystemEventArgs earliestChange = changeQueue.Dequeue();
+                    string pathname = earliestChange.FullPath;
+                    if (!pathname.StartsWith(localFolder))
+                    {
+                        Logger.DebugFormat("Path {0} does not apply for target {1}.", pathname, localFolder);
+                        activityListener.ActivityStopped();
+                        continue;
+                    }
+                    if (pathname == localFolder)
+                    {
+                        continue;
+                    }
+                    if (earliestChange is CmisSync.Lib.Watcher.MovedEventArgs)
+                    {
+                        // Move
+                        CmisSync.Lib.Watcher.MovedEventArgs change = (CmisSync.Lib.Watcher.MovedEventArgs)earliestChange;
+                        Logger.DebugFormat("Processing 'Moved': {0} -> {1}.", change.OldFullPath, pathname);
+                        bool done = WatchSyncMove(remoteFolder, localFolder, change.OldFullPath, pathname);
+                        locallyModified |= !done;
+                    }
+                    else if (earliestChange is RenamedEventArgs)
+                    {
+                        // Rename
+                        RenamedEventArgs change = (RenamedEventArgs)earliestChange;
+                        Logger.DebugFormat("Processing 'Renamed': {0} -> {1}.", change.OldFullPath, pathname);
+                        bool done = WatchSyncMove(remoteFolder, localFolder, change.OldFullPath, pathname);
+                        locallyModified |= !done;
+                    }
+                    else
+                    {
+                        Logger.DebugFormat("Processing '{0}': {1}.", earliestChange.ChangeType, pathname);
+                        switch (earliestChange.ChangeType)
+                        {
+                            case WatcherChangeTypes.Created:
+                            case WatcherChangeTypes.Changed:
+                                bool done = WatcherSyncUpdate(remoteFolder, localFolder, pathname);
+                                locallyModified |= !done;
+                                break;
+                            case WatcherChangeTypes.Deleted:
+                                done = WatcherSyncDelete(remoteFolder, localFolder, pathname);
+                                locallyModified |= !done;
+                                break;
+                            default:
+                                Logger.ErrorFormat("Ignoring change with unhandled type -> '{0}': {1}.", earliestChange.ChangeType, pathname);
+                                break;
+                        }
+                    }
+                    activityListener.ActivityStopped();
+                }
+                return locallyModified;
             }
 
+
             /// <summary>
-            /// Watchers the sync update.
+            /// An event was received from the filesystem watcher, analyze the change and apply it.
+            /// <returns>Whether the move has now been synchronized, so that no further action is needed</returns>
+            /// </summary>
+            private bool WatchSyncMove(string remoteFolder, string localFolder, string oldPathname, string newPathname)
+            {
+                bool success = true;
+                SleepWhileSuspended();
+                string oldDirectory = Path.GetDirectoryName(oldPathname);
+                string oldFilename = Path.GetFileName(oldPathname);
+                string oldLocalName = oldPathname.Substring(localFolder.Length + 1);
+                string oldRemoteName = Path.Combine(remoteFolder, oldLocalName).Replace('\\', '/'); // FIXME
+                string oldRemoteBaseName = Path.GetDirectoryName(oldRemoteName).Replace('\\', '/');
+                bool oldPathnameWorthSyncing = Utils.WorthSyncing(oldDirectory, oldFilename, repoInfo);
+                string newDirectory = Path.GetDirectoryName(newPathname);
+                string newFilename = Path.GetFileName(newPathname);
+                string newLocalName = newPathname.Substring(localFolder.Length + 1);
+                string newRemoteName = Path.Combine(remoteFolder, newLocalName).Replace('\\', '/');
+                string newRemoteBaseName = Path.GetDirectoryName(newRemoteName).Replace('\\', '/');
+                bool newPathnameWorthSyncing = Utils.WorthSyncing(newDirectory, newFilename, repoInfo);
+                bool rename = oldDirectory.Equals(newDirectory) && !oldFilename.Equals(newFilename);
+                bool move = !oldDirectory.Equals(newDirectory) && oldFilename.Equals(newFilename);
+                if ((rename && move) || (!rename && !move))
+                {
+                    Logger.ErrorFormat("Not a valid rename/move: {0} -> {1}", oldPathname, newPathname);
+                    return true; // It is not our problem that watcher data is not valid.
+                }
+                try
+                {
+                    if (oldPathnameWorthSyncing && newPathnameWorthSyncing)
+                    {
+                        if (database.ContainsFile(SyncItemFactory.CreateFromLocalPath(oldPathname, repoInfo)))
+                        {
+                            if (database.ContainsFile(SyncItemFactory.CreateFromLocalPath(newPathname, repoInfo)))
+                            {
+                                //database already contains path so revert back to delete/update
+                                success &= WatcherSyncDelete(remoteFolder, localFolder, oldPathname);
+                                success &= WatcherSyncUpdate(remoteFolder, localFolder, newPathname);
+                            }
+                            else
+                            {
+                                if (rename)
+                                {
+                                    //rename file...
+                                    IDocument remoteDocument = (IDocument)session.GetObjectByPath(oldRemoteName);
+                                    success &= RenameFile(oldDirectory, newFilename, remoteDocument);
+                                }
+                                else //move
+                                {
+                                    //move file...
+                                    IDocument remoteDocument = (IDocument)session.GetObjectByPath(oldRemoteName);
+                                    IFolder oldRemoteFolder = (IFolder)session.GetObjectByPath(oldRemoteBaseName);
+                                    IFolder newRemoteFolder = (IFolder)session.GetObjectByPath(newRemoteBaseName);
+                                    success &= MoveFile(oldDirectory, newDirectory, oldRemoteFolder, newRemoteFolder, remoteDocument);
+                                }
+                            }
+                        }
+                        else if (database.ContainsFolder(oldPathname))
+                        {
+                            if (database.ContainsFolder(newPathname))
+                            {
+                                //database already contains path so revert back to delete/update
+                                success &= WatcherSyncDelete(remoteFolder, localFolder, oldPathname);
+                                success &= WatcherSyncUpdate(remoteFolder, localFolder, newPathname);
+                            }
+                            else
+                            {
+                                if (rename)
+                                {
+                                    //rename folder...
+                                    IFolder remoteFolderObject = (IFolder)session.GetObjectByPath(oldRemoteName);
+                                    success &= RenameFolder(oldDirectory, newFilename, remoteFolderObject);
+                                }
+                                else //move
+                                {
+                                    //move folder...
+                                    IFolder remoteFolderObject = (IFolder)session.GetObjectByPath(oldRemoteName);
+                                    IFolder oldRemoteFolder = (IFolder)session.GetObjectByPath(oldRemoteBaseName);
+                                    IFolder newRemoteFolder = (IFolder)session.GetObjectByPath(newRemoteBaseName);
+                                    success &= MoveFolder(oldDirectory, newDirectory, oldRemoteFolder, newRemoteFolder, remoteFolderObject);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            //File/Folder has not been synced before so simply update
+                            success &= WatcherSyncUpdate(remoteFolder, localFolder, newPathname);
+                        }
+                    }
+                    else if (oldPathnameWorthSyncing && !newPathnameWorthSyncing)
+                    {
+                        //New path not worth syncing
+                        success &= WatcherSyncDelete(remoteFolder, localFolder, oldPathname);
+                    }
+                    else if (!oldPathnameWorthSyncing && newPathnameWorthSyncing)
+                    {
+                        //Old path not worth syncing
+                        success &= WatcherSyncUpdate(remoteFolder, localFolder, newPathname);
+                    }
+                    else
+                    {
+                        //Neither old or new path worth syncing
+                    }
+                }
+                catch (Exception e)
+                {
+                    success = false;
+                    ProcessRecoverableException("Could process watcher sync move: " + oldPathname + " -> " + newPathname, e);
+                }
+                return success;
+            }
+
+
+            /// <summary>
+            /// Sync update.
             /// </summary>
             /// <param name="remoteFolder">Remote folder.</param>
             /// <param name="localFolder">Local folder.</param>
             /// <param name="pathname">Pathname.</param>
-            private void WatcherSyncUpdate(string remoteFolder, string localFolder, string pathname)
+            /// <returns>Whether the update has now been synchronized, so that no further action is needed</returns>
+            private bool WatcherSyncUpdate(string remoteFolder, string localFolder, string pathname)
             {
-                string name = pathname.Substring(localFolder.Length + 1);
-                string remotePathname = CmisUtils.PathCombine(remoteFolder, name);
-
-                IFolder remoteBase = null;
-                if (File.Exists(pathname) || Directory.Exists(pathname))
+                SleepWhileSuspended();
+                string filename = Path.GetFileName(pathname);
+                if (!Utils.WorthSyncing(Path.GetDirectoryName(pathname), filename, repoInfo))
                 {
-                    string remoteBaseName = Path.GetDirectoryName(remotePathname).Replace('\\', '/');
-                    try
-                    {
-                        remoteBase = (IFolder)session.GetObjectByPath(remoteBaseName);
-                    }
-                    catch (Exception e)
-                    {
-                        Logger.Warn(String.Format("Exception when query remote {0}: ", remoteBaseName), e);
-                    }
-                    if (null == remoteBase)
-                    {
-                        Logger.Warn(String.Format("The remote base folder {0} for local {1} does not exist, ignore for the update action", remoteBaseName, pathname));
-                        return;
-                    }
+                    return true;
                 }
-                else
-                {
-                    Logger.Info(String.Format("The file/folder {0} is deleted, ignore for the update action", pathname));
-                    return;
-                }
-
                 try
                 {
+                    string name = pathname.Substring(localFolder.Length + 1);
+                    string remoteName = Path.Combine(remoteFolder, name).Replace('\\', '/');
+                    IFolder remoteBase = null;
+                    if (File.Exists(pathname) || Directory.Exists(pathname))
+                    {
+                        string remoteBaseName = Path.GetDirectoryName(remoteName).Replace('\\', '/');
+                        remoteBase = (IFolder)session.GetObjectByPath(remoteBaseName);
+                        if (null == remoteBase)
+                        {
+                            Logger.WarnFormat("The remote base folder {0} for local {1} does not exist, ignore for the update action", remoteBaseName, pathname);
+                            return true; // Ignore is not a failure.
+                        }
+                    }
+                    else
+                    {
+                        Logger.InfoFormat("The file/folder {0} is deleted, ignore for the update action", pathname);
+                        return true; 
+                    }
                     if (File.Exists(pathname))
                     {
                         bool success = false;
-                        repo.Watcher.RemoveChange(pathname, Watcher.ChangeTypes.Created);
-                        repo.Watcher.RemoveChange(pathname, Watcher.ChangeTypes.Changed);
-
-                        if (database.ContainsFile(SyncItemFactory.CreateFromLocalPath(pathname, repoinfo)))
+                        if (database.ContainsFile(SyncItemFactory.CreateFromLocalPath(pathname, repoInfo)))
                         {
                             if (database.LocalFileHasChanged(pathname))
                             {
                                 success = UpdateFile(pathname, remoteBase);
-                                Logger.Info(String.Format("Update {0}: {1}", pathname, success));
+                                Logger.InfoFormat("Update {0}: {1}", pathname, success);
                             }
                             else
                             {
                                 success = true;
-                                Logger.Info(String.Format("File {0} remains unchanged, ignore for the update action", pathname));
+                                Logger.InfoFormat("File {0} remains unchanged, ignore for the update action", pathname);
                             }
                         }
                         else
                         {
                             success = UploadFile(pathname, remoteBase);
-                            Logger.Info(String.Format("Upload {0}: {1}", pathname, success));
+                            Logger.InfoFormat("Upload {0}: {1}", pathname, success);
                         }
-                        if (!success)
+                        if (success)
                         {
-                            Logger.Warn("Failure to update: " + pathname);
-                            repo.Watcher.InsertChange(pathname, Watcher.ChangeTypes.Changed);
-                        }
-                        return;
-                    }
-                }
-                catch (Exception e)
-                {
-                    Logger.Warn(String.Format("Exception while sync to update file {0} : ", pathname), e);
-                    return;
-                }
-
-                try
-                {
-                    if (Directory.Exists(pathname))
-                    {
-                        if (repoinfo.isPathIgnored(remotePathname))
-                        {
-                            repo.Watcher.RemoveChange(pathname);
-                            return;
-                        }
-
-                        if (database.ContainsFolder(pathname))
-                        {
-                            Logger.Info(String.Format("Database exists for {0}, ignore for the update action", pathname));
-                            repo.Watcher.RemoveChange(pathname);
+                            return true;
                         }
                         else
                         {
-                            Logger.Info("Uploading local folder to server: " + pathname);
-                            UploadFolderRecursively(remoteBase, pathname);
-                            repo.Watcher.RemoveChange(pathname);
+                            Logger.WarnFormat("Failure to update: {0}", pathname);
+                            return false;
                         }
-                        return;
                     }
+                    if (Directory.Exists(pathname))
+                    {
+                        bool success = true;
+                        if (database.ContainsFolder(pathname))
+                        {
+                            Logger.InfoFormat("Folder exists in Database {0}, ignore for the update action", pathname);
+                        }
+                        else
+                        {
+                            Logger.InfoFormat("Create locally created folder on server: {0}", pathname);
+                            success &= UploadFolderRecursively(remoteBase, pathname);
+                        }
+                        return success;
+                    }
+                    Logger.InfoFormat("The file/folder {0} is deleted, ignore for the update action", pathname);
                 }
                 catch (Exception e)
                 {
-                    Logger.Warn(String.Format("Exception while sync to update folder {0}: ", pathname), e);
-                    return;
+                    ProcessRecoverableException("Could process watcher sync update: " + pathname, e);
+                    return false;
                 }
-
-                Logger.Info(String.Format("The file/folder {0} is deleted, ignore for the update action", pathname));
+                return true;
             }
 
             /// <summary>
@@ -205,75 +308,22 @@ namespace CmisSync.Lib.Sync
             /// <param name="remoteFolder">Remote folder.</param>
             /// <param name="localFolder">Local folder.</param>
             /// <param name="pathname">Pathname.</param>
-            private void WatcherSyncDelete(string remoteFolder, string localFolder, string pathname)
+            /// <returns>Whether the delete has now been synchronized, so that no further action is needed</returns>
+            private bool WatcherSyncDelete(string remoteFolder, string localFolder, string pathname)
             {
-                string name = pathname.Substring(localFolder.Length + 1);
-                string remoteName = Path.Combine(remoteFolder, name).Replace('\\', '/');
-                DbTransaction transaction = null;
-                try
-                {
-                    transaction = database.BeginTransaction();
+                SleepWhileSuspended();
 
-                    if (database.ContainsFile(SyncItemFactory.CreateFromLocalPath(pathname, repoinfo))) // FIXME remote or local?
-                    {
-                        Logger.Info("Removing locally deleted file on server: " + pathname);
-                        try
-                        {
-                            IDocument remote = (IDocument)session.GetObjectByPath(remoteName);
-                            if (remote != null)
-                            {
-                                remote.DeleteAllVersions();
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            Logger.Warn(String.Format("Exception when operate remote {0}: ", remoteName), e);
-                        }
-                        database.RemoveFile(SyncItemFactory.CreateFromLocalPath(pathname, repoinfo));
-                    }
-                    else if (database.ContainsFolder(pathname))
-                    {
-                        Logger.Info("Removing locally deleted folder on server: " + pathname);
-                        try
-                        {
-                            IFolder remote = (IFolder)session.GetObjectByPath(remoteName);
-                            if (remote != null)
-                            {
-                                remote.DeleteTree(true, null, true);
-                            }
-                        }
-                        catch (Exception e)
-                        {
-                            Logger.Warn(String.Format("Exception when operate remote {0}: ", remoteName), e);
-                        }
-                        database.RemoveFolder(SyncItemFactory.CreateFromLocalPath(pathname, repoinfo));
-                    }
-                    else
-                    {
-                        Logger.Info("Ignore the delete action for the local created and deleted file/folder: " + pathname);
-                    }
-                    transaction.Commit();
-                }
-                catch (Exception e)
-                {
-                    if (transaction != null)
-                    {
-                        transaction.Rollback();
-                    }
-                    Logger.Warn(String.Format("Exception while sync to delete file/folder {0}: ", pathname), e);
-                    return;
-                }
-                finally
-                {
-                    if (transaction != null)
-                    {
-                        transaction.Dispose();
-                    }
-                }
-
-                repo.Watcher.RemoveChange(pathname, Watcher.ChangeTypes.Deleted);
-
-                return;
+                // In many programs (like Microsoft Word), deletion is often just a save:
+                // 1. Save data to temporary file ~wrdxxxx.tmp
+                // 2. Delete Example.doc
+                // 3. Rename ~wrdxxxx.tmp to Example.doc
+                // See https://support.microsoft.com/en-us/kb/211632
+                // So, upon deletion, wait a bit for any save operation to hopefully finalize, then sync.
+                // This is not 100% foolproof, as saving can last for more than GRACE_TIME, but probably
+                // the best we can do without mind-reading third-party programs.
+                int GRACE_TIME = 15000; // 15 seconds.
+                Thread.Sleep(GRACE_TIME);
+                return false; // Perform a sync.
             }
         }
     }

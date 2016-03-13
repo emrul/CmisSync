@@ -115,8 +115,12 @@ namespace CmisSync
 
                     BeginInvoke((Action)delegate
                     {
-                        this.stateItem.Text = state_text;
-                        this.trayicon.Text = Utils.Ellipsis(Properties_Resources.CmisSync + "\n" + state_text, 63);
+                        stateItem.Text = state_text;
+                        string iconText = Utils.Ellipsis(Properties_Resources.CmisSync + "\n" + state_text, 63);
+                        if (!iconText.Equals(trayicon.Text)) // TODO Useful? http://stackoverflow.com/q/34083778
+                        {
+                            trayicon.Text = iconText;
+                        }
                     });
                 }
             };
@@ -128,7 +132,7 @@ namespace CmisSync
                 {
                     BeginInvoke((Action)delegate
                     {
-                        CreateMenu();
+                        this.trayicon.Text = Utils.Ellipsis(Properties_Resources.CmisSync + "\n" + Controller.StateText, 63);
                     });
                 }
             };
@@ -162,9 +166,9 @@ namespace CmisSync
                 {
                     //Only show balloon tips when notifications are on
 
-                    SystemSounds.Exclamation.Play();
+                    // SystemSounds.Exclamation.Play(); Disabled because annoying.
 
-                    trayicon.ShowBalloonTip(25000, title, message, ToolTipIcon.Error);
+                    //trayicon.ShowBalloonTip(25000, title, message, ToolTipIcon.Error);
 
                     //System.Windows.Forms.MessageBox.Show(message, title,
                     //    System.Windows.Forms.MessageBoxButtons.OK,
@@ -252,14 +256,13 @@ namespace CmisSync
                     openLocalFolderItem.Click += OpenLocalFolderDelegate(folderName);
 
                     // Sub-item: open remotely.
-                    /*ToolStripMenuItem openRemoteFolderItem = new ToolStripMenuItem()
+                    ToolStripMenuItem openRemoteFolderItem = new ToolStripMenuItem()
                     {
                         Text = CmisSync.Properties_Resources.BrowseRemoteFolder,
                         Name = "openRemote",
                         Image = UIHelpers.GetBitmap("classic_folder_web"),
                     };
                     openRemoteFolderItem.Click += OpenRemoteFolderDelegate(folderName);
-                    */
 
                     // Sub-item: suspend sync.
                     ToolStripMenuItem suspendFolderItem = new ToolStripMenuItem()
@@ -308,41 +311,49 @@ namespace CmisSync
 
                     // Add the sub-items.
                     subfolderItem.DropDownItems.Add(openLocalFolderItem);
-                    //subfolderItem.DropDownItems.Add(openRemoteFolderItem);
+                    subfolderItem.DropDownItems.Add(openRemoteFolderItem);
                     subfolderItem.DropDownItems.Add(new ToolStripSeparator());
                     subfolderItem.DropDownItems.Add(suspendFolderItem);
                     subfolderItem.DropDownItems.Add(manualSyncItem);
-                    subfolderItem.DropDownItems.Add(new ToolStripSeparator());
-                    subfolderItem.DropDownItems.Add(removeFolderFromSyncItem);
-                    subfolderItem.DropDownItems.Add(new ToolStripSeparator());
-                    subfolderItem.DropDownItems.Add(settingsItem);
+
+                    // Add the configuration modification sub-items, if configuration is not frozen.
+                    if ( ! ConfigManager.CurrentConfig.FrozenConfiguration)
+                    {
+                        subfolderItem.DropDownItems.Add(new ToolStripSeparator());
+                        subfolderItem.DropDownItems.Add(removeFolderFromSyncItem);
+                        subfolderItem.DropDownItems.Add(new ToolStripSeparator());
+                        subfolderItem.DropDownItems.Add(settingsItem);
+                    }
 
                     // Add the main item.
                     this.traymenu.Items.Add(subfolderItem);
                 }
             }
             this.traymenu.Items.Add(new ToolStripSeparator());
-
+            
             // Create the menu item that lets the user add a new synchronized folder.
-            ToolStripMenuItem addFolderItem = new ToolStripMenuItem()
+            // Depending on configuration, disable or skip some elements.
+            if (!ConfigManager.CurrentConfig.FrozenConfiguration)
             {
-                Text = CmisSync.Properties_Resources.AddARemoteFolder,
-                Name = "add",
-                Image = UIHelpers.GetBitmap("connect")
-            };
+                ToolStripMenuItem addFolderItem = new ToolStripMenuItem()
+                {
+                    Text = CmisSync.Properties_Resources.AddARemoteFolder,
+                    Name = "add",
+                    Image = UIHelpers.GetBitmap("connect")
+                };
+                addFolderItem.Click += delegate
+                {
+                    Controller.AddRemoteFolderClicked();
+                };
+                this.traymenu.Items.Add(addFolderItem);
+                this.traymenu.Items.Add(new ToolStripSeparator());
 
-            if (ConfigManager.CurrentConfig.SingleRepository && ConfigManager.CurrentConfig.Folder.Count > 0)
-            {
-                //Configured for single repository and repository count 1 or more so disable menu item.
-                addFolderItem.Enabled = false;
+                if (ConfigManager.CurrentConfig.SingleRepository && ConfigManager.CurrentConfig.Folders.Count > 0)
+                {
+                    //Configured for single repository and repository count 1 or more so disable menu item.
+                    addFolderItem.Enabled = false;
+                }
             }
-
-            addFolderItem.Click += delegate
-            {
-                Controller.AddRemoteFolderClicked();
-            };
-            this.traymenu.Items.Add(addFolderItem);
-            this.traymenu.Items.Add(new ToolStripSeparator());
 
             // Create the menu item that lets the user view the log.
             ToolStripMenuItem log_item = new ToolStripMenuItem()
@@ -395,7 +406,7 @@ namespace CmisSync
 	            UIHelpers.GetIcon ("process-syncing-iiii"),
 	            UIHelpers.GetIcon ("process-syncing-iiiii")
 			};
-            this.errorIcon = UIHelpers.GetIcon("process-syncing-error"); // NOTGDS2
+            this.errorIcon = UIHelpers.GetIcon("process-syncing-error");
         }
 
 
@@ -422,13 +433,25 @@ namespace CmisSync
         /// <summary>
         /// MouseEventListener function for popping up context menu.
         /// </summary>
-        private void TrayIcon_MouseClick(Object sender, MouseEventArgs e) // NOTGDS2
+        private void TrayIcon_MouseClick(Object sender, MouseEventArgs e)
         {
             if (e.Button == MouseButtons.Left)
             {
                 MethodInfo mi = typeof(NotifyIcon).GetMethod("ShowContextMenu", BindingFlags.Instance | BindingFlags.NonPublic);
                 mi.Invoke(trayicon, null);
             }
+        }
+
+
+        /// <summary>
+        /// Delegate for opening the remote folder.
+        /// </summary>
+        private EventHandler OpenRemoteFolderDelegate(string reponame)
+        {
+            return delegate
+            {
+                Controller.RemoteFolderClicked(reponame);
+            };
         }
 
 

@@ -718,7 +718,7 @@ namespace CmisSync
                                             System.Windows.Controls.TreeViewItem subItem =
                                                 new System.Windows.Controls.TreeViewItem();
                                             subItem.Tag = new SelectionTreeItem(null, subfolder);
-                                            subItem.Header = Path.GetFileName(subfolder);
+                                            subItem.Header = CmisSync.Lib.Utils.GetLeafOfCmisPath(subfolder);
                                             item.Items.Add(subItem);
                                         }
                                         ((SelectionTreeItem)item.Tag).childrenLoaded = true;
@@ -726,6 +726,12 @@ namespace CmisSync
                                         System.Windows.Forms.Cursor.Current = System.Windows.Forms.Cursors.Default;
                                     }
                                 };
+
+                                //expand the repository if there is only one
+                                if (Controller.repositories.Count == 1)
+                                {
+                                    ((TreeViewItem)treeView.Items[0]).IsSelected = true;
+                                }
 
                                 Button cancel_button = new Button()
                                 {
@@ -1082,7 +1088,7 @@ namespace CmisSync
                                     Content = Properties_Resources.SyncAtStartup,
                                     IsChecked = Controller.saved_syncatstartup,
                                     FontWeight = FontWeights.Bold,
-                                    Width = 400,
+                                    Width = 400
                                 };
 
                                 // Sync duration input GUI.
@@ -1090,10 +1096,16 @@ namespace CmisSync
                                 {
                                     Text = Properties_Resources.SyncInterval + ":",
                                     FontWeight = FontWeights.Bold,
-                                    Width = 200,
+                                    Width = 100
                                 };
 
-                                PollIntervalSlider slider = new PollIntervalSlider()
+                                TextBlock slider_value = new TextBlock()
+                                {
+                                    FontWeight = FontWeights.Bold,
+                                    Width = 100
+                                };
+
+                                PollIntervalSlider slider = new PollIntervalSlider(slider_value)
                                 {
                                     Width = 400,
                                     PollInterval = Controller.saved_sync_interval
@@ -1102,7 +1114,7 @@ namespace CmisSync
                                 TextBlock slider_min_label = new TextBlock()
                                 {
                                     Text = slider.FormattedMinimum(),
-                                    Width = 200,
+                                    Width = 200
                                 };
 
                                 TextBlock slider_max_label = new TextBlock()
@@ -1167,6 +1179,10 @@ namespace CmisSync
                                 ContentCanvas.Children.Add(slider_label);
                                 Canvas.SetTop(slider_label, 250);
                                 Canvas.SetLeft(slider_label, 185);
+
+                                ContentCanvas.Children.Add(slider_value);
+                                Canvas.SetTop(slider_value, 250);
+                                Canvas.SetLeft(slider_value, 285);
 
                                 ContentCanvas.Children.Add(slider);
                                 Canvas.SetTop(slider, 270);

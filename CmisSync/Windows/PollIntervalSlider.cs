@@ -20,12 +20,10 @@ namespace CmisSync
     {
         protected static readonly ILog Logger = LogManager.GetLogger(typeof(PollIntervalSlider));
 
-
         /// <summary>
-        /// Tooltip that shows poll interval  when mouse goes over the slider.
+        /// External label showing the current value.
         /// </summary>
-        private ToolTip _autoToolTip;
-
+        private TextBlock sliderLabel;
 
         /// <summary>
         /// Poll interval shown/tuned by the slider.
@@ -39,17 +37,17 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// Constructor.
         /// </summary>
-        public PollIntervalSlider()
+        public PollIntervalSlider(TextBlock sliderLabel)
         {
+            this.sliderLabel = sliderLabel;
+
             this.IsSnapToTickEnabled = true;
             this.Minimum = LogScaleConverter.Convert(1000 * 5);
             this.Maximum = LogScaleConverter.Convert(1000 * 60 * 60 * 24);
             this.TickPlacement = TickPlacement.BottomRight;
-            this.AutoToolTipPlacement = AutoToolTipPlacement.BottomRight;
 
             // Add ticks to the slider.
             DoubleCollection tickMarks = new DoubleCollection();
@@ -66,34 +64,38 @@ namespace CmisSync
             tickMarks.Add(LogScaleConverter.Convert(1000 * 60 * 60 * 12));
             tickMarks.Add(LogScaleConverter.Convert(1000 * 60 * 60 * 24));
             this.Ticks = tickMarks;
-        }
 
+            // Show current value in UI.
+            ShowCurrentValue();
+        }
 
         protected override void OnThumbDragStarted(DragStartedEventArgs e)
         {
             base.OnThumbDragStarted(e);
-            this.FormatAutoToolTipContent();
+            this.ShowCurrentValue();
         }
-
 
         protected override void OnThumbDragDelta(DragDeltaEventArgs e)
         {
             base.OnThumbDragDelta(e);
-            this.FormatAutoToolTipContent();
+            this.ShowCurrentValue();
         }
 
-
+        /// <summary></summary>
+        /// <returns></returns>
         public string FormattedMaximum()
         {
             return FormatToolTip((int)this.Maximum);
         }
 
-
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <returns></returns>
         public string FormattedMinimum()
         {
             return FormatToolTip((int)this.Minimum);
         }
-
 
         private string FormatToolTip(int value)
         {
@@ -125,40 +127,29 @@ namespace CmisSync
             }
         }
 
-
-        private void FormatAutoToolTipContent()
+        private void ShowCurrentValue()
         {
-            this.AutoToolTip.Content = FormatToolTip((int)this.Value);
-        }
-
-
-        private ToolTip AutoToolTip
-        {
-            get
-            {
-                if (_autoToolTip == null)
-                {
-                    FieldInfo field = typeof(Slider).GetField(
-                        "_autoToolTip", BindingFlags.NonPublic | BindingFlags.Instance);
-                    _autoToolTip = field.GetValue(this) as ToolTip;
-                }
-                return _autoToolTip;
-            }
+            sliderLabel.Text = FormatToolTip((int)this.Value);
         }
     }
 
-
+    /// <summary></summary>
     public class LogScaleConverter
     {
+        /// <summary></summary>
         protected static readonly ILog Logger = LogManager.GetLogger(typeof(LogScaleConverter));
 
-
+        /// <summary></summary>
+        /// <param name="value"></param>
+        /// <returns></returns>
         public static int Convert(int value)
         {
             return (int)Math.Log((double)value);
         }
 
-
+        /// <summary></summary>
+        /// <param name="value"></param>
+        /// <returns></returns>
         public static int ConvertBack(int value)
         {
             Logger.Debug("ConvertBack " + value + " type:" + value.GetType());

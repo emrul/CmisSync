@@ -32,7 +32,7 @@ namespace CmisSync.Lib
         /// Component which will receive notifications intended for the end-user.
         /// A GUI program might raise a pop-up, a CLI program might print a line.
         /// </summary>
-        private static UserNotificationListener UserNotificationListener;
+        private static UserNotificationListener userNotificationListener;
 
 
         /// <summary>
@@ -40,7 +40,7 @@ namespace CmisSync.Lib
         /// </summary>
         public static void SetUserNotificationListener(UserNotificationListener listener)
         {
-            UserNotificationListener = listener;
+            userNotificationListener = listener;
         }
 
 
@@ -49,7 +49,7 @@ namespace CmisSync.Lib
         /// </summary>
         public static void NotifyUser(string message)
         {
-            UserNotificationListener.NotifyUser(message);
+            userNotificationListener.NotifyUser(message);
         }
 
 
@@ -114,11 +114,7 @@ namespace CmisSync.Lib
             return writeAllow && !writeDeny;
         }
 
-
-        /// <summary>
         /// Names of files that must be excluded from synchronization.
-
-        /// </summary>
         private static HashSet<String> ignoredFilenames = new HashSet<String>{
             "~", // gedit and emacs
             "thumbs.db", "desktop.ini", // Windows
@@ -148,13 +144,13 @@ namespace CmisSync.Lib
         /// Extensions of files that must be excluded from synchronization.
         /// </summary>
         private static HashSet<String> ignoredExtensions = new HashSet<String>{
-            ".autosave", // Various autosaving apps
-            ".~lock", // LibreOffice
-            ".part", ".crdownload", // Firefox and Chromium temporary download files
-            ".un~", ".swp", ".swo", // vi(m)
-            ".tmp", // Microsoft Office
-            ".sync", // CmisSync download
-            ".cmissync", // CmisSync database
+            "autosave", // Various autosaving apps
+            "~lock", // LibreOffice
+            "part", "crdownload", // Firefox and Chromium temporary download files
+            "un~", "swp", "swo", // vi(m)
+            "tmp", // Microsoft Office
+            "sync", // CmisSync download
+            "cmissync", // CmisSync database
         };
 
         /// <summary>
@@ -168,7 +164,6 @@ namespace CmisSync.Lib
                 return false;
             }
 
-
             filename = filename.ToLower();
 
             if (ignoredFilenames.Contains(filename) ||
@@ -176,18 +171,22 @@ namespace CmisSync.Lib
             {
                 Logger.DebugFormat("Skipping {0}: ignored file", filename);
                 return false;
-
             }
 
-            if (ignoredExtensions.Contains(Path.GetExtension(filename)))
+            // Check filename extension if there is one.
+            if (filename.Contains('.'))
             {
-                Logger.DebugFormat("Skipping {0}: ignored file extension", filename);
-                return false;
+                string extension = filename.Split('.').Last();
 
+                if (ignoredExtensions.Contains(extension))
+                {
+                    Logger.DebugFormat("Skipping {0}: ignored file extension", filename);
+                    return false;
+                }
             }
 
-            //Check filename length
-            String fullPath = Path.Combine(localDirectory, filename);
+            // Check resulting file path length
+            string fullPath = PathCombine(localDirectory, filename);
 
             #if __COCOA__ || __MonoCS__
             // TODO Check filename length for OS X
@@ -195,7 +194,8 @@ namespace CmisSync.Lib
             // * FileName encoding is UTF-16 (Modified NFD).
 
             #else
-            // reflection
+            // Get Path.MaxPath
+            // It is not a public field so reflection is necessary.
 
 			FieldInfo maxPathField = typeof(Path).GetField("MaxPath",
                 BindingFlags.Static |
@@ -204,14 +204,12 @@ namespace CmisSync.Lib
 
             if (fullPath.Length > (int)maxPathField.GetValue(null))
             {
-                Logger.DebugFormat("Skipping {0}: path too long", fullPath);
+                Logger.WarnFormat("Skipping {0}: path too long", fullPath);
                 return false;
-
             }
             #endif
 
             return true;
-
         }
 
 
@@ -256,9 +254,9 @@ namespace CmisSync.Lib
             return true;
         }
 
+        /// <summary>
         /// Check whether the file is worth syncing or not.
         /// This optionally excludes blank files or files too large.
-
         /// </summary>
         public static bool IsFileWorthSyncing(string filepath, RepoInfo repoInfo)
         {
@@ -267,7 +265,6 @@ namespace CmisSync.Lib
                 bool allowBlankFiles = true; //TODO: add a preference repoInfo.allowBlankFiles
                 bool limitFilesize = false; //TODO: add preference for filesize limiting
                 long filesizeLimit = 256 * 1024 * 1024; //TODO: add a preference for filesize limit
-
 
                 FileInfo fileInfo = new FileInfo(filepath);
 
@@ -312,24 +309,20 @@ namespace CmisSync.Lib
         {
             return IsFilenameWorthSyncing(localDirectory, filename) &&
                 IsDirectoryWorthSyncing(localDirectory, repoInfo) &&
-                IsFileWorthSyncing(Path.Combine(localDirectory, filename), repoInfo);
+                IsFileWorthSyncing(PathCombine(localDirectory, filename), repoInfo);
         }
 
+        /// <summary>
         /// Determines whether this instance is valid ISO-8859-1 specified input.
         /// </summary>
-        /// <returns>
-        /// <c>true</c> if this instance is valid ISO-8859-1 specified input; otherwise, <c>false</c>.
-        /// </returns>
-        /// <param name='input'>
-        /// If set to <c>true</c> input.
-        /// </param>
+        /// <param name="input">If set to <c>true</c> input.</param>
+        /// <returns><c>true</c> if this instance is valid ISO-8859-1 specified input; otherwise, <c>false</c>.</returns>
         public static bool IsValidISO88591(string input)
         {
             byte[] bytes = Encoding.GetEncoding(28591).GetBytes(input);
             String result = Encoding.GetEncoding(28591).GetString(bytes);
             return String.Equals(input, result);
         }
-
 
         /// <summary>
         /// Check whether the file is worth syncing or not.
@@ -379,13 +372,13 @@ namespace CmisSync.Lib
             return ret;
         }
 
-
         /// <summary>
         /// Regular expression to check whether a file name is valid or not.
+        /// In particular, CmisSync forbids characters that would not be allowed on Windows:
+        /// https://msdn.microsoft.com/en-us/library/windows/desktop/aa365247%28v=vs.85%29.aspx#file_and_directory_names
         /// </summary>
         private static Regex invalidFileNameRegex = new Regex(
             "[" + Regex.Escape(new string(Path.GetInvalidFileNameChars())+"\"?:/\\|<>*") + "]");
-
 
         /// <summary>
         /// Check whether a folder name is valid or not.
@@ -404,11 +397,19 @@ namespace CmisSync.Lib
 
 
         /// <summary>
+        /// Like Path.Combine, but does not choke on special characters.
+        /// Special characters are a separate concern, use this method if it is not the current concern.
+        /// </summary>
+        public static string PathCombine(string localDirectory, string filename)
+        {
+            return localDirectory + Path.DirectorySeparatorChar + filename;
+        }
+
+        /// <summary>
         /// Regular expression to check whether a filename is valid or not.
         /// </summary>
         private static Regex invalidFolderNameRegex = new Regex(
             "[" + Regex.Escape(new string(Path.GetInvalidPathChars())+"\"?:/\\|<>*") + "]");
-
 
         /// <summary>
         /// Find an available conflict free filename for this file.
@@ -447,8 +448,7 @@ namespace CmisSync.Lib
                 while (true);
             }
         }
-        
-        
+
         /// <summary>
         /// Format a file size nicely.
         /// Example: 1048576 becomes "1 MB"
@@ -513,7 +513,6 @@ namespace CmisSync.Lib
             return FormatBandwidth((double) bitsPerSecond);
         }
 
-        
         /// <summary>
         /// Whether a file or directory is a symbolic link.
         /// </summary>
@@ -540,6 +539,45 @@ namespace CmisSync.Lib
         public static bool IsSymlink(FileSystemInfo fsi)
         {
             return ((fsi.Attributes & FileAttributes.ReparsePoint) == FileAttributes.ReparsePoint);
+        }
+
+
+        public static void MoveFolderLocally(string origin, string destination)
+        {
+            //string destinationBase = Path.GetDirectoryName(destination);
+
+            Directory.Move(origin, Path.Combine(destination)); // TODO might be more complex when a folder is moved to a non-yet-existing folder hierarchy
+        }
+
+
+        public static void DeleteEvenIfReadOnly(string filePath)
+        {
+            File.SetAttributes(filePath, FileAttributes.Normal); // Might have been made read-only.
+            File.Delete(filePath);
+        }
+
+        /// <summary>
+        /// Get the last part of a CMIS path
+        /// Example: "/the/path/< 9000/theleaf" returns "theleaf"
+        /// Why not use Path.GetFileName ? Because it chokes on characters that are not authorized on the local filesystem.
+        /// </summary>
+        /// <returns></returns>
+        public static string GetLeafOfCmisPath(string cmisPath)
+        {
+            return cmisPath.Split('/').Last();
+        }
+
+        public static void ConfigureLogging()
+        {
+            FileInfo alternativeLog4NetConfigFile = new FileInfo(Path.Combine(Directory.GetParent(ConfigManager.CurrentConfigFile).FullName, "log4net.config"));
+            if (alternativeLog4NetConfigFile.Exists)
+            {
+                log4net.Config.XmlConfigurator.ConfigureAndWatch(alternativeLog4NetConfigFile);
+            }
+            else
+            {
+                log4net.Config.XmlConfigurator.Configure(ConfigManager.CurrentConfig.GetLog4NetConfig());
+            }
         }
     }
 }

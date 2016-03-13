@@ -1,4 +1,4 @@
-using DotCMIS;
+﻿using DotCMIS;
 using DotCMIS.Client;
 using DotCMIS.Client.Impl;
 using DotCMIS.Exceptions;
@@ -8,6 +8,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Web;
 using CmisSync.Auth;
+using System.IO;
 
 namespace CmisSync.Lib.Cmis
 {
@@ -36,17 +37,16 @@ namespace CmisSync.Lib.Cmis
         }
     }
 
-
     /// <summary>
     /// Useful CMIS methods.
     /// </summary>
     public static class CmisUtils
     {
+        // Log.
         private static readonly ILog Logger = LogManager.GetLogger(typeof(CmisUtils));
 
-
+        /// <summary>Character that separates two folders in a CMIS path.</summary>
         public static char CMIS_FILE_SEPARATOR = '/';
-
 
         /// <summary>
         /// Try to find the CMIS server associated to any URL.
@@ -86,24 +86,28 @@ namespace CmisSync.Lib.Cmis
             // See https://github.com/aegif/CmisSync/wiki/What-address for the list of ECM products prefixes
             // Please send us requests to support more CMIS servers: https://github.com/aegif/CmisSync/issues
             string[] suffixes = {
-                "/cmis/atom11",
-                "/alfresco/cmisatom",
-                "/alfresco/service/cmis",
-                "/cmis/resources/",
-                "/emc-cmis-ea/resources/",
-                "/emc-cmis-weblogic/resources/",
-                "/emc-cmis-wls/resources/",
-                "/emc-cmis-was61/resources/",
-                "/emc-cmis-wls1030/resources/",
-                "/xcmis/rest/cmisatom",
-                "/files/basic/cmis/my/servicedoc",
-                "/p8cmis/resources/Service",
-                "/_vti_bin/cmis/rest?getRepositories",
-                "/nemakiware/atom/bedroom", // TODO: different port, typically 8080 for Web UI and 3000 for CMIS
-                "/nuxeo/atom/cmis",
+                "/alfresco/api/-default-/public/cmis/versions/1.1/atom", // Alfresco 4.2 CMIS 1.1
+                "/alfresco/api/-default-/public/cmis/versions/1.0/atom", // Alfresco 4.2 CMIS 1.0
+                "/alfresco/cmisatom", // Alfresco 4.0 and 4.1
+                "/alfresco/service/cmis", // Alfresco 3.x
+                "/cmis/atom11", // OpenDataSpace
+                "/rest/private/cmisatom/", // eXo Platform
+                "/xcmis/rest/cmisatom", // xCMIS
+                "/files/basic/cmis/my/servicedoc", // IBM Connections
+                "/p8cmis/resources/Service", // IBM FileNet
+                "/logicaldoc/service/cmis", // LogicalDOC
+                "/_vti_bin/cmis/rest?getRepositories", // Microsoft SharePoint
+                "/nemakiware/atom/bedroom", // NemakiWare  TODO: different port, typically 8080 for Web UI and 3000 for CMIS
+                "/nuxeo/atom/cmis", // Nuxeo
                 "/cmis/atom",
-                "/docushare/ds_mobile_connector/atom",
-                "/documents/ds_mobile_connector/atom" // TODO: can be anything instead of "documents"
+                "/cmis/resources/", // EMC Documentum
+                "/emc-cmis-ea/resources/", // EMC Documentum
+                "/emc-cmis-weblogic/resources/", // EMC Documentum
+                "/emc-cmis-wls/resources/", // EMC Documentum
+                "/emc-cmis-was61/resources/", // EMC Documentum
+                "/emc-cmis-wls1030/resources/", // EMC Documentum
+                "/docushare/ds_mobile_connector/atom", // Xerox DocuShare
+                "/documents/ds_mobile_connector/atom" // Xerox DocuShare  TODO: can be anything instead of "documents"
             };
             string bestUrl = null;
             // Try all suffixes
@@ -192,7 +196,10 @@ namespace CmisSync.Lib.Cmis
             // Populate the result list with identifier and name of each repository.
             foreach (IRepository repo in repositories)
             {
-                result.Add(repo.Id, repo.Name);
+                // Repo name is sometimes empty (ex: Alfresco), in such case show the repo id instead.
+                string name = repo.Name.Length == 0 ? repo.Id : repo.Name;
+
+                result.Add(repo.Id, name);
             }
 
             return result;
@@ -248,14 +255,20 @@ namespace CmisSync.Lib.Cmis
             /// Children.
             /// </summary>
             public List<FolderTree> Children = new List<FolderTree>();
+
             /// <summary>
             /// Folder path.
             /// </summary>
             public string Path;
+
             /// <summary>
             /// Folder name.
             /// </summary>
             public string Name { get; set; }
+
+            /// <summary>
+            /// 
+            /// </summary>
             public bool Finished { get; set; }
 
             /// <summary>
@@ -437,6 +450,22 @@ namespace CmisSync.Lib.Cmis
 
 
         /// <summary>
+        /// Get the latest ChangeLog token.
+        /// Alfresco sends a null token if no change has ever happened. In that case, return empty string. See https://issues.alfresco.com/jira/browse/ALF-21276
+        /// </summary>
+        /// <param name="session"></param>
+        /// <returns></returns>
+        public static string GetChangeLogToken(ISession session)
+        {
+            session.Clear(); // Clear all caches.
+            session.Binding.GetRepositoryService().GetRepositoryInfos(null);
+            string token = session.Binding.GetRepositoryService().GetRepositoryInfo(session.RepositoryInfo.Id, null).LatestChangeLogToken;
+            Logger.Debug("Server token:" + token);
+            return token ?? string.Empty;
+        }
+
+
+        /// <summary>
         /// Equivalent of .NET Path.Combine, but for CMIS paths.
         /// CMIS paths always use forward slashes.
         /// </summary>
@@ -449,6 +478,26 @@ namespace CmisSync.Lib.Cmis
                 return path1;
 
             return path1 + CMIS_FILE_SEPARATOR + path2;
+        }
+
+
+        /// <summary>
+        /// Should the local file/folder be made read-only?
+        /// Check the permissions of the current user to the remote file/folder.
+        /// </summary>
+        public static void MakeReadOnlyIfCannotModifyRemote(IFileableCmisObject remoteObject, string localPath)
+        {
+            bool readOnly = !remoteObject.AllowableActions.Actions.Contains(PermissionMappingKeys.CanAddToFolderObject);
+            if (readOnly)
+            {
+                new DirectoryInfo(localPath).Attributes = FileAttributes.ReadOnly;
+            }
+        }
+
+
+        public static bool IsDocumentum(ISession session)
+        {
+            return session.RepositoryInfo.ProductName.Contains("Documentum");
         }
     }
 }

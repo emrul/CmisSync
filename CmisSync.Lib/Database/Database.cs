@@ -63,13 +63,13 @@ namespace CmisSync.Lib.Database
         /// <summary>
         /// the prefix to remove before storing paths.
         /// </summary>
-        private string pathPrefix;
+        private string localPathPrefix;
 
 
         /// <summary>
         /// Length of the prefix to remove before storing paths.
         /// </summary>
-        private int pathPrefixSize;
+        private int localPathPrefixSize;
 
         /// <summary>
         /// The prefix to remove before storing remote paths.
@@ -84,14 +84,17 @@ namespace CmisSync.Lib.Database
 
         /// <summary>
         /// Constructor.
+        /// dataPath: Local path to the database file
+        /// localPathPrefix: Path to the synchronized files, ex: C:\Users\win7pro32bit\CmisSync\agency
+        /// remotePathPrefix: Path on the remote server, ex: /Sites/swsdp/documentLibrary/Agency Files
         /// </summary>
-        public Database(string dataPath)
+        public Database(string databaseFileName, string localPathPrefix, string remotePathPrefix)
         {
-            this.databaseFileName = dataPath;
-            pathPrefix = GetPathPrefix();
-            pathPrefixSize = pathPrefix.Length + 1;
-            remotePathPrefix = GetRemotePathPrefix();
-            remotePathPrefixSize = remotePathPrefix.Length + 1;
+            this.databaseFileName = databaseFileName;
+            this.localPathPrefix = localPathPrefix;
+            this.localPathPrefixSize = localPathPrefix.Length + 1;
+            this.remotePathPrefix = remotePathPrefix;
+            this.remotePathPrefixSize = remotePathPrefix.Length + 1;
         }
 
         /// <summary>
@@ -217,10 +220,10 @@ namespace CmisSync.Lib.Database
         /// </summary>
         private string RemoveLocalPrefix(string path)
         {
-            if (path.StartsWith(pathPrefix))
+            if (path.StartsWith(localPathPrefix))
             {
                 // Remove path prefix
-                path = path.Substring(pathPrefixSize, path.Length - pathPrefixSize);
+                path = path.Substring(localPathPrefixSize, path.Length - localPathPrefixSize);
                 // RemoveLocalPrefix all slashes to forward slash
                 //path = path.Replace('\\', '/');
             }
@@ -243,7 +246,10 @@ namespace CmisSync.Lib.Database
                 return path;
             }
             // Insert path prefix
-            return Path.Combine(ConfigManager.CurrentConfig.FoldersPath, path).Replace('/', Path.DirectorySeparatorChar);
+            return Path.Combine(
+                localPathPrefix,
+                path.Replace('/', Path.DirectorySeparatorChar)
+            );
         }
 
         /// <summary>
@@ -474,8 +480,8 @@ namespace CmisSync.Lib.Database
             parameters.Add("path", item.RemoteRelativePath + "/%");
             ExecuteSQLAction("DELETE FROM files WHERE path LIKE @path", parameters);
         }
-
-
+        
+        
         /// <summary>
         /// Move a file.
         /// </summary>
@@ -600,17 +606,13 @@ namespace CmisSync.Lib.Database
             parameters.Add("path", item.RemoteRelativePath);
             ExecuteSQLAction(command, parameters);
         }
-            
 
         /// <summary>
         /// Gets the upload retry counter.
         /// </summary>
-        /// <returns>
-        /// The upload retry counter.
-        /// </returns>
-        /// <param name='path'>
-        /// Path of the local file.
-        /// </param>
+        /// <param name="path">Path of the local file.</param>
+        /// <param name="type"></param>
+        /// <returns>The upload retry counter.</returns>
         public long GetOperationRetryCounter(string path, OperationType type)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
@@ -634,16 +636,12 @@ namespace CmisSync.Lib.Database
             { return 0; }
         }
 
-
         /// <summary>
         /// Gets the upload retry counter.
         /// </summary>
-        /// <returns>
-        /// The upload retry counter.
-        /// </returns>
-        /// <param name='path'>
-        /// Path of the local file.
-        /// </param>
+        /// <param name="item">Path of the local file.</param>
+        /// <param name="type"></param>
+        /// <returns>The upload retry counter.</returns>
         public long GetOperationRetryCounter(SyncItem item, OperationType type)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
@@ -667,16 +665,12 @@ namespace CmisSync.Lib.Database
             { return 0; }
         }
 
-
         /// <summary>
         /// Sets the upload retry counter.
         /// </summary>
-        /// <param name='path'>
-        /// Path of the local file.
-        /// </param>
-        /// <param name='counter'>
-        /// Counter.
-        /// </param>
+        /// <param name="item">Path of the local file.</param>
+        /// <param name="counter">Counter.</param>
+        /// <param name="type"></param>
         public void SetOperationRetryCounter(SyncItem item, long counter, OperationType type)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
@@ -724,13 +718,10 @@ namespace CmisSync.Lib.Database
             ExecuteSQLAction(command, parameters);
         }
 
-
         /// <summary>
         /// Deletes the upload retry counter.
         /// </summary>
-        /// <param name='path'>
-        /// Path of the local file.
-        /// </param>
+        /// <param name="item">Path of the local file.</param>
         public void DeleteAllFailedOperations(SyncItem item)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
@@ -738,7 +729,6 @@ namespace CmisSync.Lib.Database
             string command = @"DELETE FROM failedoperations WHERE path=@path";
             ExecuteSQLAction(command, parameters);
         }
-
 
         /// <summary>
         /// Deletes all failed upload counter.
@@ -750,10 +740,10 @@ namespace CmisSync.Lib.Database
             ExecuteSQLAction(command, parameters);
         }
 
-
         /// <summary>
         /// Recalculate the checksum of a file and save it to database.
         /// </summary>
+        /// <param name="syncItem"></param>
         public void RecalculateChecksum(SyncItem syncItem)
         {
             string checksum;
@@ -778,10 +768,11 @@ namespace CmisSync.Lib.Database
             ExecuteSQLAction(command, parameters);
         }
 
-
         /// <summary>
         /// Checks whether the database contains a given item.
         /// </summary>
+        /// <param name="item"></param>
+        /// <returns></returns>
         public bool ContainsFile(SyncItem item)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
@@ -797,18 +788,16 @@ namespace CmisSync.Lib.Database
             }
         }
 
-
-
         /// <summary>
-        /// <returns>path field in files table for <paramref name="id"/></returns>
         /// </summary>
+        /// <param name="id"></param>
+        /// <returns>Path field in files table for <paramref name="id"/></returns>
         public string GetRemoteFilePath(string id)
         {
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             parameters.Add("id", id);
             return Denormalize((string)ExecuteSQLFunction("SELECT path FROM files WHERE id=@id", parameters));
         }
-
 
         /// <summary>
         /// Gets the syncitem from id.
@@ -823,9 +812,8 @@ namespace CmisSync.Lib.Database
             string remotePath = (string)result["path"];
             object localPathObj = result["localPath"];
             string localPath = (localPathObj is DBNull) ? remotePath : (string)localPathObj;
-            return SyncItemFactory.CreateFromPaths(pathPrefix, localPath, remotePathPrefix, remotePath);
+            return SyncItemFactory.CreateFromPaths(localPathPrefix, localPath, remotePathPrefix, remotePath);
         }
-
 
         /// <summary>
         /// Gets the syncitem from local path.
@@ -843,7 +831,7 @@ namespace CmisSync.Lib.Database
                 return null;
             }
 
-            return SyncItemFactory.CreateFromPaths(pathPrefix, normalizedLocalPath, remotePathPrefix, path);
+            return SyncItemFactory.CreateFromPaths(localPathPrefix, normalizedLocalPath, remotePathPrefix, path);
         }
 
         /// <summary>
@@ -862,7 +850,7 @@ namespace CmisSync.Lib.Database
                 return null;
             }
 
-            return SyncItemFactory.CreateFromPaths(pathPrefix, localPath, remotePathPrefix, normalizedRemotePath);
+            return SyncItemFactory.CreateFromPaths(localPathPrefix, localPath, remotePathPrefix, normalizedRemotePath);
         }
 
         /// <summary>
@@ -881,7 +869,7 @@ namespace CmisSync.Lib.Database
                 return null;
             }
 
-            return SyncItemFactory.CreateFromPaths(pathPrefix, normalizedLocalPath, remotePathPrefix, path);
+            return SyncItemFactory.CreateFromPaths(localPathPrefix, normalizedLocalPath, remotePathPrefix, path);
         }
 
         /// <summary>
@@ -900,9 +888,8 @@ namespace CmisSync.Lib.Database
                 return null;
             }
 
-            return SyncItemFactory.CreateFromPaths(pathPrefix, localPath, remotePathPrefix, normalizedRemotePath);
+            return SyncItemFactory.CreateFromPaths(localPathPrefix, localPath, remotePathPrefix, normalizedRemotePath);
         }
-            
 
         /// <summary>
         /// Checks whether the database contains a given folder.
@@ -921,7 +908,6 @@ namespace CmisSync.Lib.Database
         /// </summary>
         public bool ContainsFolder(SyncItem item)
         {
-
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             if (item is RemotePathSyncItem)
             {
@@ -935,7 +921,15 @@ namespace CmisSync.Lib.Database
             }
         }
 
-
+        /// <summary>
+        /// <returns>path field in files table for <paramref name="id"/></returns>
+        /// </summary>
+        public string GetFilePath(string id)
+        {
+            Dictionary<string, object> parameters = new Dictionary<string, object>();
+            parameters.Add("id", id);
+            return Denormalize((string)ExecuteSQLFunction("SELECT path FROM files WHERE id=@id", parameters));
+        }
 
         /// <summary>
         /// <returns>path field in folders table for <paramref name="id"/></returns>
@@ -946,7 +940,6 @@ namespace CmisSync.Lib.Database
             parameters.Add("id", id);
             return Denormalize((string)ExecuteSQLFunction("SELECT path FROM folders WHERE id=@id", parameters));
         }
-
 
         /// <summary>
         /// Check whether a file's content has changed locally since it was last synchronized.
@@ -977,7 +970,6 @@ namespace CmisSync.Lib.Database
             return !currentChecksum.Equals(previousChecksum);
         }
 
-
         /// <summary>
         /// Get checksum from database.
         /// Public for debugging purposes only.
@@ -995,15 +987,23 @@ namespace CmisSync.Lib.Database
             return res;
         }
 
-
         /// <summary>
         /// Get the ChangeLog token that was stored at the end of the last successful CmisSync synchronization.
+        /// If no ChangeLog has ever been stored, return null.
         /// </summary>
         public string GetChangeLogToken()
         {
-            return (string)ExecuteSQLFunction("SELECT value FROM general WHERE key=\"ChangeLogToken\"", null);
-        }
+            var token = ExecuteSQLFunction("SELECT value FROM general WHERE key=\"ChangeLogToken\"", null);
 
+            if (token is DBNull)
+            {
+                return null;
+            }
+            else
+            {
+                return (string)token;
+            }
+        }
 
         /// <summary>
         /// Set the stored ChangeLog token.
@@ -1015,46 +1015,7 @@ namespace CmisSync.Lib.Database
             Dictionary<string, object> parameters = new Dictionary<string, object>();
             parameters.Add("token", token);
             ExecuteSQLAction(command, parameters);
-        }
-
-        const string PathPrefixKey = "PathPrefix";
-
-        /// <summary>
-        /// Gets the path prefix.
-        /// If no prefix has been found, the db will be migrated and the old one will be returned
-        /// </summary>
-        /// <returns>
-        /// The path prefix.
-        /// </returns>
-        private string GetPathPrefix()
-        {
-            object result = GetGeneralTableValue(PathPrefixKey);
-            // Migration of databases, which do not have any prefix saved
-            if (result == null)
-            {
-                var syncFolder = ConfigManager.CurrentConfig.Folder.Find((f) => f.GetRepoInfo().CmisDatabase == this.databaseFileName);
-                string oldprefix = syncFolder.LocalPath;
-                SetPathPrefix(oldprefix);
-                return oldprefix;
-            }
-            else
-            {
-                return (string)result;
-            }
-        }
-
-        /// <summary>
-        /// Sets the path prefix.
-        /// </summary>
-        /// <param name='pathprefix'>
-        /// Pathprefix.
-        /// </param>
-        private void SetPathPrefix(string pathprefix)
-        {
-            SetGeneralTableValue(PathPrefixKey, pathprefix);
-
-            this.pathPrefix = pathprefix;
-            this.pathPrefixSize = pathprefix.Length + 1;
+            Logger.Info("Database ChangeLog token set to: " + token);
         }
 
         const string RemotePathPrefixKey = "RemotePathPrefix";
@@ -1069,7 +1030,7 @@ namespace CmisSync.Lib.Database
             object result = GetGeneralTableValue(RemotePathPrefixKey);
             if (result == null)
             {
-                var syncFolder = ConfigManager.CurrentConfig.Folder.Find((f) => f.GetRepoInfo().CmisDatabase == this.databaseFileName);
+                var syncFolder = ConfigManager.CurrentConfig.Folders.Find((f) => f.GetRepoInfo().CmisDatabase == this.databaseFileName);
                 string oldprefix = syncFolder.RemotePath;
                 SetRemotePathPrefix(oldprefix);
                 return oldprefix;
@@ -1093,7 +1054,6 @@ namespace CmisSync.Lib.Database
             this.remotePathPrefixSize = pathprefix.Length + 1;
         }
 
-
         private object GetGeneralTableValue(string key)
         {
             string command = "SELECT value FROM general WHERE key=@key";
@@ -1103,7 +1063,6 @@ namespace CmisSync.Lib.Database
             return result;
         }
 
-
         private void SetGeneralTableValue(string key, string value)
         {
             string command = "INSERT OR REPLACE INTO general (key, value) VALUES(@key, @value)";
@@ -1112,7 +1071,6 @@ namespace CmisSync.Lib.Database
             parameters.Add("value", value);
             ExecuteSQLAction(command, parameters);
         }
-
 
         /// <summary>
         /// Checks whether the database contains a given folders's id.
@@ -1126,7 +1084,6 @@ namespace CmisSync.Lib.Database
             parameters.Add("@path", path);
             return null != ExecuteSQLFunction("SELECT id FROM folders WHERE path = @path;", parameters);
         }
-
 
         /// <summary>
         /// Helper method to execute an SQL command that does not return anything.
@@ -1149,7 +1106,6 @@ namespace CmisSync.Lib.Database
                 }
             }
         }
-
 
         /// <summary>
         /// Helper method to execute an SQL command that returns something.
@@ -1207,12 +1163,18 @@ namespace CmisSync.Lib.Database
             }
         }
 
-
+        /// <summary></summary>
         public enum OperationType
         {
-            UPLOAD, DOWNLOAD, CHANGE, DELETE
+            /// <summary></summary>
+            UPLOAD,
+            /// <summary></summary>
+            DOWNLOAD,
+            /// <summary></summary>
+            CHANGE,
+            /// <summary></summary>
+            DELETE
         }
-
 
         /// <summary>
         /// Helper method to fill the parameters inside an SQL command.
@@ -1231,7 +1193,6 @@ namespace CmisSync.Lib.Database
                 }
             }
         }
-
 
         private string operationTypeToString(OperationType type)
         {

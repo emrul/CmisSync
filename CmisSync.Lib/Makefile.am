@@ -12,13 +12,15 @@ SOURCES =  \
 	Cmis/BaseException.cs \
 	Cmis/PermissionDeniedException.cs \
 	Cmis/CmisUtils.cs \
-	Cmis/Database.cs \
 	Cmis/ServerNotFoundException.cs \
 	Cmis/MimeType.cs \
 	Config.cs \
 	ConfigManager.cs \
 	ConfigMigration.cs \
-	DatabaseMigration.cs \
+	Database/Database.cs \
+	Database/DatabaseMigration.cs \
+	Database/DatabaseMigrationBase.cs \
+	Database/DatabaseMigrationToVersion3.cs \
 	Events/ActiveActivitiesManager.cs \
 	Events/ConfigChangedEvent.cs \
 	Events/DebugLoggingHandler.cs \
@@ -37,7 +39,7 @@ SOURCES =  \
 	RepoBase.cs \
 	RepoInfo.cs \
 	SyncItem.cs \
-	Sync/ChangeLogStrategy.cs \
+	Sync/ChangeLogThenCrawlStrategy.cs \
 	Sync/CmisRepo.cs \
 	Sync/CrawlStrategy.cs \
 	Sync/SynchronizedFolder.cs \

@@ -44,41 +44,36 @@ namespace CmisSync
         /// </summary>
         protected static readonly ILog Logger = LogManager.GetLogger(typeof(ControllerBase));
 
-
         /// <summary>
         /// Whether it is the first time that CmisSync is being run.
         /// </summary>
         private bool firstRun;
-
 
         /// <summary>
         /// All the info about the CmisSync synchronized folder being created.
         /// </summary>
         private RepoInfo repoInfo;
 
-
         /// <summary>
         /// Whether the repositories have finished loading.
         /// </summary>
         public bool RepositoriesLoaded { get; private set; }
-
 
         /// <summary>
         /// List of the CmisSync synchronized folders.
         /// </summary>
         private List<RepoBase> repositories = new List<RepoBase>();
 
-
         /// <summary>
         /// Path where the CmisSync synchronized folders are by default.
         /// </summary>
         public string FoldersPath { get; private set; }
 
-
         /// <summary>
         /// Show setup window event.
         /// </summary>
         public event ShowSetupWindowEventHandler ShowSetupWindowEvent = delegate { };
+
         /// <summary>
         /// Show setup window event.
         /// </summary>
@@ -94,20 +89,21 @@ namespace CmisSync
         /// </summary>
         public event Action FolderListChanged = delegate { };
 
-        public event Action OnTransmissionListChanged = delegate { };
-
         /// <summary>
         /// Called with status changes to idle.
         /// </summary>
         public event Action OnIdle = delegate { };
+
         /// <summary>
         /// Called with status changes to syncing.
         /// </summary>
         public event Action OnSyncing = delegate { };
+
         /// <summary>
         /// Called with status changes to error.
         /// </summary>
         public event Action<Tuple<string, Exception>> OnError = delegate { };
+
         /// <summary>
         /// Called with status changes to error resolved.
         /// </summary>
@@ -117,11 +113,11 @@ namespace CmisSync
         /// Alert notification.
         /// </summary>
         public event AlertNotificationRaisedEventHandler AlertNotificationRaised = delegate { };
+
         /// <summary>
         /// Alert notification.
         /// </summary>
         public delegate void AlertNotificationRaisedEventHandler(string title, string message);
-
 
         /// <summary>
         /// Get the repositories configured in CmisSync.
@@ -135,7 +131,6 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// Whether it is the first time that CmisSync is being run.
         /// </summary>
@@ -147,7 +142,6 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// The list of synchronized folders.
         /// </summary>
@@ -156,7 +150,7 @@ namespace CmisSync
             get
             {
                 List<string> folders = new List<string>();
-                foreach (Config.SyncConfig.Folder f in ConfigManager.CurrentConfig.Folder)
+                foreach (Config.SyncConfig.Folder f in ConfigManager.CurrentConfig.Folders)
                     folders.Add(f.DisplayName);
                 folders.Sort();
 
@@ -164,32 +158,25 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// Add CmisSync to the list of programs to be started up when the user logs into Windows.
         /// </summary>
         public abstract void CreateStartupItem();
-
 
         /// <summary>
         /// Add CmisSync to the user's Windows Explorer bookmarks.
         /// </summary>
         public abstract void AddToBookmarks();
 
-
         /// <summary>
         /// Creates the CmisSync folder in the user's home folder.
         /// </summary>
         public abstract bool CreateCmisSyncFolder();
 
-
         /// <summary>
         /// Keeps track of whether a download or upload is going on, for display of the task bar animation.
         /// </summary>
         private IActivityListener activityListenerAggregator;
-
-
-        private ActiveActivitiesManager activitiesManager;
 
 
         /// <summary>
@@ -202,24 +189,13 @@ namespace CmisSync
         /// </summary>
         private Object repo_lock = new Object();
 
-
         /// <summary>
         /// Constructor.
         /// </summary>
         public ControllerBase()
         {
             activityListenerAggregator = new ActivityListenerAggregator(this);
-            FoldersPath = ConfigManager.CurrentConfig.FoldersPath;
-            activitiesManager = new ActiveActivitiesManager();
-            this.activitiesManager.ActiveTransmissions.CollectionChanged += delegate(object sender, System.Collections.Specialized.NotifyCollectionChangedEventArgs e) {
-                OnTransmissionListChanged();
-            };
         }
-
-        public List<FileTransmissionEvent> ActiveTransmissions() {
-            return this.activitiesManager.ActiveTransmissions.ToList<FileTransmissionEvent>();
-        }
-
 
         /// <summary>
         /// Initialize the controller.
@@ -228,6 +204,8 @@ namespace CmisSync
         public virtual void Initialize(Boolean firstRun)
         {
             this.firstRun = firstRun;
+
+            FoldersPath = ConfigManager.CurrentConfig.FoldersPath;
 
             // Create the CmisSync folder and add it to the bookmarks
             bool syncFolderCreated = CreateCmisSyncFolder();
@@ -245,7 +223,6 @@ namespace CmisSync
             folderLock = new FolderLock(FoldersPath);
         }
 
-
         /// <summary>
         /// Once the GUI has loaded, show setup window if it is the first run, or check the repositories.
         /// </summary>
@@ -254,20 +231,16 @@ namespace CmisSync
             if (firstRun)
             {
                 ShowSetupWindow(PageType.Setup);
-
             }
-            else
+
+            new Thread(() =>
             {
-                new Thread(() =>
-                {
-                    CheckRepositories();
-                    RepositoriesLoaded = true;
-                    // Update GUI.
-                    FolderListChanged();
-                }).Start();
-            }
+                CheckRepositories();
+                RepositoriesLoaded = true;
+                // Update GUI.
+                FolderListChanged();
+            }).Start();
         }
-
 
         /// <summary>
         /// Initialize (in the GUI and syncing mechanism) an existing CmisSync synchronized folder.
@@ -277,12 +250,6 @@ namespace CmisSync
         {
             RepoBase repo = null;
             repo = new CmisSync.Lib.Sync.CmisRepo(repositoryInfo, activityListenerAggregator);
-
-            repo.EventManager.AddEventHandler(
-                new GenericSyncEventHandler<FileTransmissionEvent>( 50, delegate(ISyncEvent e){
-                this.activitiesManager.AddTransmission(e as FileTransmissionEvent);
-                return false;
-            }));
             this.repositories.Add(repo);
             repo.Initialize();
         }
@@ -308,7 +275,7 @@ namespace CmisSync
         /// </summary>
         public void RemoveRepositoryFromSync(string reponame)
         {
-            Config.SyncConfig.Folder f = ConfigManager.CurrentConfig.getFolder(reponame);
+            Config.SyncConfig.Folder f = ConfigManager.CurrentConfig.GetFolder(reponame);
             if (f != null)
             {
                 RemoveRepository(f);
@@ -363,7 +330,6 @@ namespace CmisSync
             RemoveDatabase(dbfilename);
         }
 
-
         /// <summary>
         /// Remove the local database associated with a CmisSync synchronized folder.
         /// </summary>
@@ -378,15 +344,38 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// Pause or un-pause synchronization for a particular folder.
         /// </summary>
         /// <param name="repoName">the folder to pause/unpause</param>
-        public void StartOrSuspendRepository(string repoName)
+        public void SuspendOrResumeRepositorySynchronization(string repoName)
         {
             lock (this.repo_lock)
             {
+                //FIXME: why are we sospendig all repositories instead of the one passed?
+                foreach (RepoBase aRepo in this.repositories)
+                {
+                    if (aRepo.Status != SyncStatus.Suspend)
+                    {
+                        SuspendRepositorySynchronization(repoName);
+                    }
+                    else
+                    {
+                        ResumeRepositorySynchronization(repoName);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Pause synchronization for a particular folder.
+        /// </summary>
+        /// <param name="repoName">the folder to pause</param>
+        public void SuspendRepositorySynchronization(string repoName)
+        {
+            lock (this.repo_lock)
+            {
+                //FIXME: why are we sospendig all repositories instead of the one passed?
                 foreach (RepoBase aRepo in this.repositories)
                 {
                     if (aRepo.Status != SyncStatus.Suspend)
@@ -394,14 +383,22 @@ namespace CmisSync
                         aRepo.Suspend();
                         Logger.Debug("Requested to suspend sync of repo " + aRepo.Name);
                     }
-                    else
-                    {
-                        if (aRepo.Status != SyncStatus.Suspend)
-                        {
-                            aRepo.Suspend();
-                            Logger.Debug("Requested to syspend sync of repo " + aRepo.Name);
                         }
-                        else
+            }
+        }
+
+        /// <summary>
+        /// Un-pause synchronization for a particular folder.
+        /// </summary>
+        /// <param name="repoName">the folder to unpause</param>
+        public void ResumeRepositorySynchronization(string repoName)
+        {
+            lock (this.repo_lock)
+            {
+                //FIXME: why are we sospendig all repositories instead of the one passed?
+                foreach (RepoBase aRepo in this.repositories)
+                {
+                    if (aRepo.Status == SyncStatus.Suspend)
                         {
                             aRepo.Resume();
                             Logger.Debug("Requested to resume sync of repo " + aRepo.Name);
@@ -409,8 +406,6 @@ namespace CmisSync
                     }
                 }
             }
-        }
-
 
         /// <summary>
         /// Check the configured CmisSync synchronized folders.
@@ -422,7 +417,7 @@ namespace CmisSync
             {
                 List<Config.SyncConfig.Folder> toBeDeleted = new List<Config.SyncConfig.Folder>();
                 // If folder has been deleted, remove it from configuration too.
-                foreach (Config.SyncConfig.Folder f in ConfigManager.CurrentConfig.Folder)
+                foreach (Config.SyncConfig.Folder f in ConfigManager.CurrentConfig.Folders)
                 {
                     string folder_name = f.DisplayName;
                     string folder_path = f.LocalPath;
@@ -432,7 +427,7 @@ namespace CmisSync
                         RemoveRepository(f);
                         toBeDeleted.Add(f);
 
-                        Logger.Info("Controller | Removed folder '" + folder_name + "' from config");
+                        Logger.Info("ControllerBase | Removed folder '" + folder_name + "' from config");
 
                     }
                     else
@@ -443,7 +438,7 @@ namespace CmisSync
 
                 foreach (Config.SyncConfig.Folder f in toBeDeleted)
                 {
-                    ConfigManager.CurrentConfig.Folder.Remove(f);
+                    ConfigManager.CurrentConfig.Folders.Remove(f);
                 }
                 if (toBeDeleted.Count > 0)
                     ConfigManager.CurrentConfig.Save();
@@ -536,7 +531,6 @@ namespace CmisSync
             ShowSetupWindowEvent(page_type);
         }
 
-
         /// <summary>
         /// Show info about CmisSync
         /// </summary>
@@ -545,7 +539,6 @@ namespace CmisSync
             ShowAboutWindowEvent();
         }
 
-
         /// <summary>
         /// Show an alert to the user.
         /// </summary>
@@ -553,7 +546,6 @@ namespace CmisSync
         {
             AlertNotificationRaised(Properties_Resources.CmisSync + " " + title, message);
         }
-
 
         /// <summary>
         /// Quit CmisSync.
@@ -568,7 +560,6 @@ namespace CmisSync
             Logger.Info("Exiting.");
             Environment.Exit(0);
         }
-
 
         /// <summary>
         /// A download or upload has started, so run task icon animation.
@@ -591,6 +582,7 @@ namespace CmisSync
         /// </summary>
         public void ActivityError(Tuple<string, Exception> error)
         {
+            //FIXME: why a Tuple? We should get delegate(ErrorEvent event) or delegate(string repoName, Exception error)
             OnError(error);
         }
     }

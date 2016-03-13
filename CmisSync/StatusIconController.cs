@@ -14,6 +14,9 @@
 //   You should have received a copy of the GNU General Public License
 //   along with this program. If not, see <http://www.gnu.org/licenses/>.
 
+#if (__MonoCS__)
+#define MonoBug24381 // https://bugzilla.xamarin.com/show_bug.cgi?id=24381
+#endif
 
 using CmisSync.Lib;
 using CmisSync.Lib.Cmis;
@@ -24,7 +27,6 @@ using System.Timers;
 
 namespace CmisSync
 {
-
     /// <summary>
     /// State of the CmisSync status icon.
     /// </summary>
@@ -44,13 +46,11 @@ namespace CmisSync
         Error
     }
 
-
     /// <summary>
     /// MVC controller for the CmisSync status icon.
     /// </summary>
     public class StatusIconController
     {
-
         /// <summary>
         /// Log.
         /// </summary>
@@ -60,6 +60,7 @@ namespace CmisSync
         /// Update icon event.
         /// </summary>
         public event UpdateIconEventHandler UpdateIconEvent = delegate { };
+
         /// <summary>
         /// Update icon event.
         /// </summary>
@@ -69,6 +70,7 @@ namespace CmisSync
         /// Update menu event.
         /// </summary>
         public event UpdateMenuEventHandler UpdateMenuEvent = delegate { };
+
         /// <summary>
         /// Update menu event.
         /// </summary>
@@ -78,6 +80,7 @@ namespace CmisSync
         /// Update status event.
         /// </summary>
         public event UpdateStatusItemEventHandler UpdateStatusItemEvent = delegate { };
+
         /// <summary>
         /// Update status event.
         /// </summary>
@@ -87,12 +90,20 @@ namespace CmisSync
         /// Update suspended sync folder event.
         /// </summary>
         public event UpdateSuspendSyncFolderEventHandler UpdateSuspendSyncFolderEvent = delegate { };
+
         /// <summary>
         /// Update suspended sync folder event.
         /// </summary>
         public delegate void UpdateSuspendSyncFolderEventHandler(string reponame);
 
+        /// <summary>
+        /// 
+        /// </summary>
         public event UpdateTransmissionMenuEventHandler UpdateTransmissionMenuEvent = delegate { };
+
+        /// <summary>
+        /// 
+        /// </summary>
         public delegate void UpdateTransmissionMenuEventHandler();
 
         /// <summary>
@@ -100,24 +111,20 @@ namespace CmisSync
         /// </summary>
         public IconState CurrentState = IconState.Idle;
 
-
         /// <summary>
         /// Short text shown at the top of the menu of the CmisSync tray icon.
         /// </summary>
         public string StateText = Properties_Resources.Welcome;
-
 
         /// <summary>
         /// Maximum number of remote folders in the menu before the overflow menu appears.
         /// </summary>
         public readonly int MenuOverflowThreshold = 9;
 
-
         /// <summary>
         /// Minimum number of remote folders to populate the overflow menu.
         /// </summary>
         public readonly int MinSubmenuOverflowCount = 3;
-
 
         /// <summary>
         /// The list of remote folders to show in the CmisSync tray menu.
@@ -135,7 +142,6 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// The list of remote folders to show in the CmisSync tray's overflow menu.
         /// </summary>
@@ -151,7 +157,6 @@ namespace CmisSync
                     return new string[0];
             }
         }
-
 
         /// <summary>
         /// Total disk space taken by the sum of the remote folders.
@@ -172,19 +177,16 @@ namespace CmisSync
             }
         }
 
-
         /// <summary>
         /// Timer for the animation that appears when downloading/uploading a file.
         /// </summary>
         private Timer animation;
-
 
         /// <summary>
         /// Current frame of the animation being shown.
         /// First frame is the still icon.
         /// </summary>
         private int animation_frame_number;
-
 
         /// <summary>
         /// Constructor.
@@ -226,31 +228,44 @@ namespace CmisSync
 
                 UpdateStatusItemEvent(StateText);
 
+#if MonoBug24381
+                //this.animation_frame_number = 0; // Idle status icon
+                //UpdateIconEvent(this.animation_frame_number);
+#else
                 this.animation.Stop();
-
-//NOTGDS2: begin
                 UpdateIconEvent(CurrentState == IconState.Error ? -1 : 0);
+#endif
+
                 UpdateMenuEvent(CurrentState);
             };
 
             // Syncing.
             Program.Controller.OnSyncing += delegate
             {
+                Logger.Debug("StatusIconController OnSyncing");
                 CurrentState = IconState.Syncing;
                 StateText = Properties_Resources.SyncingChanges;
 
                 UpdateStatusItemEvent(StateText);
 
+#if MonoBug24381
+                //this.animation_frame_number = 3; // Syncing icon
+                //UpdateIconEvent(this.animation_frame_number);
+#else
                 this.animation.Start();
+#endif
             };
-
 
             // Error.
             Program.Controller.OnError += delegate(Tuple<string, Exception> error)
             {
-                Logger.Error(String.Format("Error syncing '{0}': {1}", error.Item1, error.Item2.Message), error.Item2);
+                //FIXME: why a Tuple? We should get delegate(ErrorEvent event) or delegate(string repoName, Exception error)
+                String reponame = error.Item1;
+                Exception exception = error.Item2;
 
-                string message = String.Format(Properties_Resources.SyncError, error.Item1, error.Item2.Message);
+                Logger.Error(String.Format("Error syncing '{0}': {1}", reponame, exception.Message), exception);
+
+                string message = String.Format(Properties_Resources.SyncError, reponame, exception.Message);
 
                 IconState PreviousState = CurrentState;
                 CurrentState = IconState.Error;
@@ -258,15 +273,18 @@ namespace CmisSync
 
                 UpdateStatusItemEvent(StateText);
 
+#if ! MonoBug24381
                 this.animation.Stop();
 
                 UpdateIconEvent(-1);
                 UpdateMenuEvent(CurrentState);
+#endif
 
-                if (error.Item2 is PermissionDeniedException)
+                if (exception is PermissionDeniedException)
                 {
+                    //FIXME: why it get suspended? Instead i should ask the user if the password has changed and he want to enter a new one
                     //Suspend sync...
-                    SuspendSyncClicked(error.Item1);
+                    SuspendSyncClicked(reponame);
                 }
 
                 if (PreviousState != IconState.Error)
@@ -278,31 +296,8 @@ namespace CmisSync
             Program.Controller.OnErrorResolved += delegate
             {
                 CurrentState = IconState.Idle;
-//NOTGDS2: end
-// GDS2:
-/*
-                UpdateIconEvent (0);
-//                UpdateMenuEvent (CurrentState);
-            };
-
-            Program.Controller.OnTransmissionListChanged += delegate {
-                UpdateTransmissionMenuEvent();
-            };
-
-            // Syncing.
-            Program.Controller.OnSyncing += delegate {
-                if (CurrentState != IconState.Syncing)
-                {
-                    CurrentState = IconState.Syncing;
-                    StateText = Properties_Resources.SyncingChanges;
-                    UpdateStatusItemEvent(StateText);
-
-                    this.animation.Start();
-                }
-*/
             };
         }
-
 
         /// <summary>
         /// With the local file explorer, open the folder where the local synchronized folders are.
@@ -312,7 +307,6 @@ namespace CmisSync
             Program.Controller.OpenCmisSyncFolder(reponame);
         }
 
-        
         /// <summary>
         /// With the default web browser, open the remote folder of a CmisSync synchronized folder.
         /// </summary>
@@ -326,7 +320,7 @@ namespace CmisSync
         /// </summary>
         public void SettingsClicked(string reponame)
         {
-            CmisSync.Lib.Config.SyncConfig.Folder repository = ConfigManager.CurrentConfig.getFolder(reponame);
+            CmisSync.Lib.Config.SyncConfig.Folder repository = ConfigManager.CurrentConfig.GetFolder(reponame);
             Program.UI.Setup.Controller.saved_repository = reponame;
             if (repository != null)
             {
@@ -339,7 +333,6 @@ namespace CmisSync
             Program.Controller.ShowSetupWindow(PageType.Settings);
         }
 
-
         /// <summary>
         /// Open the remote folder addition wizard.
         /// </summary>
@@ -347,7 +340,6 @@ namespace CmisSync
         {
             Program.Controller.ShowSetupWindow(PageType.Add1);
         }
-
 
         /// <summary>
         /// Open the CmisSync log with a text file viewer.
@@ -357,7 +349,6 @@ namespace CmisSync
             Program.Controller.ShowLog(ConfigManager.CurrentConfig.GetLogFilePath());
         }
 
-
         /// <summary>
         /// Show the About dialog.
         /// </summary>
@@ -365,7 +356,6 @@ namespace CmisSync
         {
             Program.Controller.ShowAboutWindow();
         }
-
 
         /// <summary>
         /// Quit CmisSync.
@@ -375,16 +365,15 @@ namespace CmisSync
             Program.Controller.Quit();
         }
 
-
         /// <summary>
         /// Suspend synchronization for a particular folder.
         /// </summary>
         public void SuspendSyncClicked(string reponame)
         {
-            Program.Controller.StartOrSuspendRepository(reponame);
+            Program.Controller.SuspendOrResumeRepositorySynchronization(reponame);
+            //TODO: the StatusIcon should listen the controlleo or the repository for Suspended changes instead of call UpdateSuspendSyncFolderEvent
             UpdateSuspendSyncFolderEvent(reponame);
         }
-
 
         /// <summary>
         /// Tries to remove a given repo from sync
@@ -424,15 +413,12 @@ namespace CmisSync
             Program.Controller.ManualSync(reponame);
         }
 
-
         /// <summary>
         /// Edit a particular folder.
         /// </summary>
         public void EditFolderClicked(string reponame)
         {
-            // TODO fix EditRepositoryFolder
-            // Program.Controller.EditRepositoryFolder(reponame);
-            Logger.Error ("Call Program.Controller.EditRepositoryFolder(" + reponame + ")");
+			SettingsClicked (reponame);
         }
 
         /// <summary>
@@ -440,6 +426,11 @@ namespace CmisSync
         /// </summary>
         private void InitAnimation()
         {
+#if MonoBug24381
+
+            //this.animation_frame_number = 3; // Syncing icon
+            //UpdateIconEvent(this.animation_frame_number);
+#else
             this.animation_frame_number = 0;
 
             this.animation = new Timer()
@@ -449,6 +440,7 @@ namespace CmisSync
 
             this.animation.Elapsed += delegate
             {
+                //Logger.Debug("StatusIconController Animation Elapsed " + this.animation_frame_number);
                 if (this.animation_frame_number < 4)
                     this.animation_frame_number++;
                 else
@@ -456,6 +448,7 @@ namespace CmisSync
 
                 UpdateIconEvent(this.animation_frame_number);
             };
+#endif
         }
     }
 }

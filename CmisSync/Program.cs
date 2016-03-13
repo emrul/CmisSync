@@ -65,6 +65,8 @@ namespace CmisSync
             Environment.SetEnvironmentVariable("MONO_XMLSERIALIZER_THS", "no");
 #endif
 
+            Controller = new Controller();
+
             bool firstRun = ! File.Exists(ConfigManager.CurrentConfigFile);
 
             ServicePointManager.CertificatePolicy = new CertPolicyHandler();
@@ -73,15 +75,7 @@ namespace CmisSync
             if ( ! firstRun )
                 ConfigMigration.Migrate();
 
-            FileInfo alternativeLog4NetConfigFile = new FileInfo(Path.Combine(Directory.GetParent(ConfigManager.CurrentConfigFile).FullName, "log4net.config"));
-            if(alternativeLog4NetConfigFile.Exists)
-            {
-                log4net.Config.XmlConfigurator.ConfigureAndWatch(alternativeLog4NetConfigFile);
-            }
-            else
-            {
-                log4net.Config.XmlConfigurator.Configure(ConfigManager.CurrentConfig.GetLog4NetConfig());
-            }
+            CmisSync.Lib.Utils.ConfigureLogging();
 
             Logger.Info("Starting. Version: " + CmisSync.Lib.Backend.Version);
 
@@ -89,7 +83,6 @@ namespace CmisSync
                 Backend.Platform != PlatformID.MacOSX &&
                 Backend.Platform != PlatformID.Win32NT)
             {
-
                 string n = Environment.NewLine;
 
                 Console.WriteLine(n +
@@ -121,7 +114,6 @@ namespace CmisSync
 
             try
             {
-                Controller = new Controller();
                 Controller.Initialize(firstRun);
 
                 UI = new GUI();
